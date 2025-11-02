@@ -1,0 +1,6 @@
+test_01.png: 80.00%
+test_02.png: 20.00%
+test_03.png: 60.00%
+test_04.png: 20.00%
+test_05.png: 100.00%
+test_06.png: 20.00%
