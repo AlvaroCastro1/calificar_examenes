@@ -231,15 +231,37 @@ class AplicacionCalificador:
         frame_nueva_pregunta.pack(fill="x", pady=(0,10))
         
         tk.Label(frame_nueva_pregunta, text="Enunciado:", bg="#f7f7f7").pack(anchor="w", padx=10, pady=(10,5))
-        self.text_enunciado = tk.Text(frame_nueva_pregunta, height=3, width=80)
-        self.text_enunciado.pack(fill="x", padx=10, pady=(0,10))
+        # Frame para el enunciado con scrollbar
+        frame_enunciado = tk.Frame(frame_nueva_pregunta)
+        frame_enunciado.pack(fill="x", padx=10, pady=(0,10))
+
+        self.text_enunciado = tk.Text(frame_enunciado, height=3, width=80, wrap="word")
+        scroll_enunciado = tk.Scrollbar(frame_enunciado, orient="vertical", command=self.text_enunciado.yview)
+        self.text_enunciado.configure(yscrollcommand=scroll_enunciado.set)
+
+        self.text_enunciado.pack(side="left", fill="both", expand=True)
+        scroll_enunciado.pack(side="right", fill="y")
         
         self.frame_opciones_pers = tk.Frame(frame_nueva_pregunta, bg="#f7f7f7")
         self.frame_opciones_pers.pack(fill="x", padx=10, pady=5)
         
         self.labels_opciones = []
         self.entries_opciones = []
+        self.radio_buttons = []
+        self.respuesta_correcta_var = tk.StringVar(value="")  # Variable para la respuesta correcta
         
+        # Frame para seleccionar respuesta correcta - CREAR PRIMERO ESTE FRAME
+        frame_respuesta_correcta = tk.Frame(frame_nueva_pregunta, bg="#f7f7f7")
+        frame_respuesta_correcta.pack(fill="x", padx=10, pady=5)
+        
+        tk.Label(frame_respuesta_correcta, text="Respuesta correcta:", 
+                bg="#f7f7f7", font=("Arial", 9, "bold")).pack(side="left")
+        
+        # Este frame contendrá los radio buttons para la respuesta correcta
+        self.frame_radios_correcta = tk.Frame(frame_respuesta_correcta, bg="#f7f7f7")
+        self.frame_radios_correcta.pack(side="left", padx=(10,0))
+        
+        # AHORA inicializar los campos de opciones
         self.actualizar_campos_opciones()
         
         # Botón para agregar pregunta
@@ -253,15 +275,17 @@ class AplicacionCalificador:
         frame_lista_preguntas.pack(fill="both", expand=True, pady=(10,0))
         
         # Treeview para mostrar preguntas
-        tree_columns = ("#", "Enunciado", "Opciones")
+        tree_columns = ("#", "Enunciado", "Opciones", "Correcta")
         self.tree_preguntas = ttk.Treeview(frame_lista_preguntas, columns=tree_columns, show="headings", height=8)
         self.tree_preguntas.heading("#", text="#")
         self.tree_preguntas.heading("Enunciado", text="Enunciado")
         self.tree_preguntas.heading("Opciones", text="Opciones")
+        self.tree_preguntas.heading("Correcta", text="Respuesta Correcta")
         
         self.tree_preguntas.column("#", width=50)
-        self.tree_preguntas.column("Enunciado", width=400)
+        self.tree_preguntas.column("Enunciado", width=300)
         self.tree_preguntas.column("Opciones", width=200)
+        self.tree_preguntas.column("Correcta", width=100)
         
         scroll_tree = ttk.Scrollbar(frame_lista_preguntas, orient="vertical", command=self.tree_preguntas.yview)
         self.tree_preguntas.configure(yscrollcommand=scroll_tree.set)
@@ -310,13 +334,15 @@ class AplicacionCalificador:
                 bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
         tk.Label(frame_info_pers, text="2. Completa todas las opciones de respuesta", 
                 bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info_pers, text="3. Haz clic en 'Agregar Pregunta' para añadirla a la lista", 
+        tk.Label(frame_info_pers, text="3. Selecciona la respuesta correcta", 
                 bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info_pers, text="4. Repite hasta tener todas las preguntas deseadas", 
+        tk.Label(frame_info_pers, text="4. Haz clic en 'Agregar Pregunta' para añadirla a la lista", 
                 bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info_pers, text="5. Guarda como JSON o genera PDF directamente", 
+        tk.Label(frame_info_pers, text="5. Repite hasta tener todas las preguntas deseadas", 
+                bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
+        tk.Label(frame_info_pers, text="6. Guarda como JSON o genera PDF directamente", 
                 bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=(2,10))
-            
+        
     def crear_pestana_cargar_json(self):
         # Pestaña 4: Cargar desde JSON
         frame_cargar = ttk.Frame(self.notebook)
@@ -604,6 +630,29 @@ class AplicacionCalificador:
             entry = tk.Entry(self.frame_opciones_pers, width=60)
             entry.grid(row=i+1, column=1, sticky="w", padx=(0,10), pady=2)
             self.entries_opciones.append(entry)
+        
+        # Actualizar también los radio buttons para respuesta correcta
+        self.actualizar_radios_correcta()
+
+    def actualizar_radios_correcta(self):
+        """Actualiza los radio buttons para seleccionar respuesta correcta"""
+        # Limpiar frame existente
+        for widget in self.frame_radios_correcta.winfo_children():
+            widget.destroy()
+        
+        self.radio_buttons.clear()
+        num_opciones = self.var_opciones_pers.get()
+        letras = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+        
+        # Crear radio buttons para cada opción
+        for i in range(num_opciones):
+            rb = tk.Radiobutton(self.frame_radios_correcta, 
+                              text=letras[i],
+                              variable=self.respuesta_correcta_var,
+                              value=letras[i],
+                              bg="#f7f7f7")
+            rb.pack(side="left", padx=5)
+            self.radio_buttons.append(rb)
     
     def agregar_pregunta(self):
         enunciado = self.text_enunciado.get("1.0", "end-1c").strip()
@@ -619,10 +668,21 @@ class AplicacionCalificador:
                 return
             opciones.append(texto_opcion)
         
+        # Validar que se haya seleccionado una respuesta correcta
+        respuesta_correcta = self.respuesta_correcta_var.get()
+        if not respuesta_correcta:
+            messagebox.showerror("Error", "Debes seleccionar la respuesta correcta.")
+            return
+        
+        # Convertir letra de respuesta correcta a índice numérico (A=0, B=1, etc.)
+        indice_correcto = ord(respuesta_correcta) - 65
+        
         # Agregar a la lista
         nueva_pregunta = {
             "enunciado": enunciado,
-            "opciones": opciones
+            "opciones": opciones,
+            "respuesta_correcta": indice_correcto,
+            "letra_correcta": respuesta_correcta
         }
         self.preguntas_personalizadas.append(nueva_pregunta)
         
@@ -633,8 +693,9 @@ class AplicacionCalificador:
         self.text_enunciado.delete("1.0", "end")
         for entry in self.entries_opciones:
             entry.delete(0, "end")
+        self.respuesta_correcta_var.set("")  # Reiniciar selección
         
-        messagebox.showinfo("Éxito", f"Pregunta {len(self.preguntas_personalizadas)} agregada correctamente.")
+        messagebox.showinfo("Éxito", f"Pregunta {len(self.preguntas_personalizadas)} agregada correctamente.\nRespuesta correcta: {respuesta_correcta}")
     
     def actualizar_lista_preguntas(self):
         """Actualiza la lista visual de preguntas"""
@@ -642,11 +703,12 @@ class AplicacionCalificador:
         
         for i, pregunta in enumerate(self.preguntas_personalizadas, 1):
             # Acortar texto para visualización
-            enunciado_corto = (pregunta['enunciado'][:60] + '...') if len(pregunta['enunciado']) > 60 else pregunta['enunciado']
-            opciones_texto = ", ".join(pregunta['opciones'][:3]) + ("..." if len(pregunta['opciones']) > 3 else "")
+            enunciado_corto = (pregunta['enunciado'][:40] + '...') if len(pregunta['enunciado']) > 40 else pregunta['enunciado']
+            opciones_texto = ", ".join(pregunta['opciones'][:2]) + ("..." if len(pregunta['opciones']) > 2 else "")
+            respuesta_correcta = pregunta.get('letra_correcta', 'N/A')
             
-            self.tree_preguntas.insert("", "end", values=(i, enunciado_corto, opciones_texto))
-    
+            self.tree_preguntas.insert("", "end", values=(i, enunciado_corto, opciones_texto, respuesta_correcta))
+
     def eliminar_pregunta(self):
         seleccion = self.tree_preguntas.selection()
         if not seleccion:
@@ -656,7 +718,7 @@ class AplicacionCalificador:
         indice = self.tree_preguntas.index(seleccion[0])
         self.preguntas_personalizadas.pop(indice)
         self.actualizar_lista_preguntas()
-    
+        
     def editar_pregunta(self):
         seleccion = self.tree_preguntas.selection()
         if not seleccion:
@@ -676,6 +738,11 @@ class AplicacionCalificador:
                 entry.insert(0, pregunta['opciones'][i])
             else:
                 entry.delete(0, "end")
+        
+        # Cargar respuesta correcta
+        letra_correcta = pregunta.get('letra_correcta', '')
+        if letra_correcta:
+            self.respuesta_correcta_var.set(letra_correcta)
         
         # Eliminar la pregunta actual (se reinsertará al guardar)
         self.preguntas_personalizadas.pop(indice)

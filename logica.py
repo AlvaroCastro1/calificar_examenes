@@ -281,7 +281,7 @@ class GestorCuestionarios:
                 continue
         
         return cuestionarios
-
+    
 class GeneradorPDF:
     """Clase para generar todos los tipos de PDFs necesarios"""
     
@@ -571,10 +571,11 @@ class GeneradorPDF:
         if not os.path.exists(carpeta_salida):
             os.makedirs(carpeta_salida)
         
-        # Generar clave de respuestas aleatoria
+        # Generar clave de respuestas desde las preguntas personalizadas
         clave_respuestas = {}
-        for i in range(len(preguntas_personalizadas)):
-            clave_respuestas[i] = random.randint(0, num_opciones-1)
+        for i, pregunta in enumerate(preguntas_personalizadas):
+            # Usar la respuesta correcta especificada en la pregunta
+            clave_respuestas[i] = pregunta.get('respuesta_correcta', random.randint(0, num_opciones-1))
         
         # Generar cuestionario PDF
         cuestionario_pdf = GeneradorPDF.generar_cuestionario_pdf(tema, preguntas_personalizadas, num_opciones)

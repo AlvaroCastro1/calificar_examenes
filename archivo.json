@@ -1,0 +1,12 @@
+{
+  "titulo": "Mi Examen Personalizado",
+  "tema": "Matemáticas",
+  "fecha_creacion": "2024-01-15T10:30:00",
+  "total_preguntas": 5,
+  "preguntas": [
+    {
+      "enunciado": "¿Cuánto es 2+2?",
+      "opciones": ["3", "4", "5", "6", "7"]
+    }
+  ]
+}
