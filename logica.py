@@ -374,6 +374,8 @@ class GeneradorPDF:
                 if incluir_clave and j == clave_respuestas[i]:
                     c.setFont("Helvetica-Bold", 8)
                     c.drawString(x_pos - 0.05 * inch, y_pos - 0.1 * inch, "X")
+                    c.setFillColorRGB(0, 0, 0)
+                    c.circle(x_pos, y_pos - 0.05 * inch, tamaño_burbuja / 2, stroke=1, fill=1)
             
             y_pos -= espacio_pregunta
             
