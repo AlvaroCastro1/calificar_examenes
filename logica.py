@@ -15,8 +15,53 @@ from reportlab.lib.units import inch
 # 📋 Funciones de calificación
 # ==============================
 
-def procesar_imagen(ruta_imagen, clave_respuestas):
+
+def procesar_imagen_con_json(ruta_imagen, archivo_json_clave):
+    """
+    Procesa una imagen de examen usando un archivo JSON como clave de respuestas
+    
+    Args:
+        ruta_imagen (str): Ruta de la imagen del examen
+        archivo_json_clave (str): Ruta del archivo JSON con las respuestas correctas
+    
+    Returns:
+        tuple: (puntaje, imagen_procesada, resultados_detallados)
+    """
+    # Cargar clave desde JSON
+    try:
+        with open(archivo_json_clave, 'r', encoding='utf-8') as f:
+            datos_clave = json.load(f)
+        
+        # Extraer respuestas correctas del JSON
+        if isinstance(datos_clave, dict) and 'respuestas' in datos_clave:
+            clave_respuestas = datos_clave['respuestas']
+        elif isinstance(datos_clave, list):
+            # Si es una lista directa de respuestas
+            clave_respuestas = {i: resp for i, resp in enumerate(datos_clave)}
+        else:
+            # Buscar respuestas en diferentes formatos
+            clave_respuestas = {}
+            for key, value in datos_clave.items():
+                if 'pregunta' in key.lower() or key.isdigit():
+                    if isinstance(value, dict) and 'correcta' in value:
+                        idx = int(key.replace('pregunta', '')) if 'pregunta' in key.lower() else int(key)
+                        clave_respuestas[idx] = value['correcta']
+                    elif isinstance(value, (int, str)):
+                        idx = int(key.replace('pregunta', '')) if 'pregunta' in key.lower() else int(key)
+                        # Convertir letras a índices (A=0, B=1, etc.)
+                        if isinstance(value, str) and value.isalpha():
+                            clave_respuestas[idx] = ord(value.upper()) - 65
+                        else:
+                            clave_respuestas[idx] = int(value)
+    
+    except Exception as e:
+        raise ValueError(f"Error al cargar el archivo JSON de claves: {str(e)}")
+    
+    # Procesar imagen
     imagen = cv2.imread(ruta_imagen)
+    if imagen is None:
+        raise ValueError("No se pudo cargar la imagen")
+    
     gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
     desenfocada = cv2.GaussianBlur(gris, (5, 5), 0)
     bordes = cv2.Canny(desenfocada, 75, 200)
@@ -45,49 +90,127 @@ def procesar_imagen(ruta_imagen, clave_respuestas):
     for c in contornos_preguntas:
         (x, y, w, h) = cv2.boundingRect(c)
         proporcion = w / float(h) if h != 0 else 0
-        if w >= 20 and h >= 20 and 0.9 <= proporcion <= 1.1:
+        if w >= 15 and h >= 15 and 0.8 <= proporcion <= 1.2:
             burbujas.append(c)
 
-    if len(burbujas) < 5:
-        raise ValueError("No se detectaron suficientes burbujas en la hoja.")
+    if len(burbujas) < len(clave_respuestas):
+        raise ValueError(f"No se detectaron suficientes burbujas. Esperadas: {len(clave_respuestas)}, Encontradas: {len(burbujas)}")
 
     burbujas = contours.sort_contours(burbujas, method="top-to-bottom")[0]
     correctas = 0
+    resultados_detallados = []
 
-    # Asumimos 5 opciones por pregunta y 5 preguntas (total 25 burbujas)
-    for (pregunta, i) in enumerate(np.arange(0, len(burbujas), 5)):
-        cnts = contours.sort_contours(burbujas[i:i + 5])[0]
+    # Asumimos 5 opciones por pregunta
+    num_opciones_por_pregunta = 5
+    
+    for (pregunta_idx, i) in enumerate(np.arange(0, len(burbujas), num_opciones_por_pregunta)):
+        if i + num_opciones_por_pregunta > len(burbujas):
+            break
+            
+        cnts = contours.sort_contours(burbujas[i:i + num_opciones_por_pregunta])[0]
         seleccionada = None
 
-        for (j, c) in enumerate(cnts):
+        for (opcion_idx, c) in enumerate(cnts):
             mascara = np.zeros(umbral.shape, dtype="uint8")
             cv2.drawContours(mascara, [c], -1, 255, -1)
             mascara = cv2.bitwise_and(umbral, umbral, mask=mascara)
             total = cv2.countNonZero(mascara)
+            
             if seleccionada is None or total > seleccionada[0]:
-                seleccionada = (total, j)
+                seleccionada = (total, opcion_idx)
 
-        # protección si la clave no tiene la pregunta
-        respuesta_correcta = clave_respuestas.get(pregunta, -1)
-        if respuesta_correcta < 0 or respuesta_correcta >= len(cnts):
-            # si no hay clave válida, marca en rojo la seleccionada
-            color = (0, 0, 255)
+        # Obtener respuesta correcta del JSON
+        respuesta_correcta = clave_respuestas.get(pregunta_idx, -1)
+        
+        # Si la respuesta correcta es una letra, convertir a índice
+        if isinstance(respuesta_correcta, str) and respuesta_correcta.isalpha():
+            respuesta_correcta = ord(respuesta_correcta.upper()) - 65
+
+        # Determinar si es correcta
+        es_correcta = (respuesta_correcta == seleccionada[1]) if respuesta_correcta >= 0 else False
+        
+        if es_correcta:
+            correctas += 1
+            color = (0, 255, 0)  # Verde
         else:
-            if respuesta_correcta == seleccionada[1]:
-                color = (0, 255, 0)
-                correctas += 1
-            else:
-                color = (0, 0, 255)
+            color = (0, 0, 255)  # Rojo
 
-        # Dibujar contorno de la respuesta correcta (si existe)
-        if 0 <= respuesta_correcta < len(cnts):
-            cv2.drawContours(hoja_color, [cnts[respuesta_correcta]], -1, color, 2)
-        else:
-            # si no hay clave válida, dibujar la seleccionada en rojo
-            cv2.drawContours(hoja_color, [cnts[seleccionada[1]]], -1, (0,0,255), 2)
+        # Guardar resultado detallado
+        resultados_detallados.append({
+            'pregunta': pregunta_idx + 1,
+            'seleccionada': seleccionada[1],
+            'correcta': respuesta_correcta,
+            'es_correcta': es_correcta,
+            'confianza': seleccionada[0]
+        })
 
-    puntaje = (correctas / len(clave_respuestas)) * 100
-    return puntaje, hoja_color
+        # Dibujar contornos
+        cv2.drawContours(hoja_color, [cnts[seleccionada[1]]], -1, color, 2)
+        
+        # Si es incorrecta, también marcar la respuesta correcta
+        if not es_correcta and 0 <= respuesta_correcta < len(cnts):
+            cv2.drawContours(hoja_color, [cnts[respuesta_correcta]], -1, (255, 255, 0), 1)  # Azul claro
+
+    puntaje = (correctas / len(clave_respuestas)) * 100 if clave_respuestas else 0
+    
+    return puntaje, hoja_color, resultados_detallados
+
+def generar_json_clave_desde_txt(ruta_txt, ruta_salida_json=None):
+    """
+    Convierte un archivo TXT de claves a formato JSON
+    
+    Args:
+        ruta_txt (str): Ruta del archivo TXT con claves
+        ruta_salida_json (str): Ruta de salida para el JSON (opcional)
+    
+    Returns:
+        dict: Datos en formato JSON
+    """
+    clave_respuestas = {}
+    
+    try:
+        with open(ruta_txt, 'r', encoding='utf-8') as f:
+            lineas = f.readlines()
+        
+        for linea in lineas:
+            linea = linea.strip()
+            if not linea or 'Pregunta' not in linea:
+                continue
+                
+            # Buscar patrones como "Pregunta X: Y"
+            partes = linea.split(':')
+            if len(partes) >= 2:
+                pregunta_part = partes[0].strip()
+                respuesta_part = partes[1].strip()
+                
+                # Extraer número de pregunta
+                num_pregunta = ''.join(filter(str.isdigit, pregunta_part))
+                if num_pregunta:
+                    num_pregunta = int(num_pregunta) - 1  # Convertir a índice 0-based
+                    
+                    # Extraer respuesta (puede ser letra o número)
+                    if respuesta_part and respuesta_part[0].isalpha():
+                        clave_respuestas[num_pregunta] = respuesta_part[0].upper()
+                    elif respuesta_part.isdigit():
+                        clave_respuestas[num_pregunta] = int(respuesta_part)
+    
+    except Exception as e:
+        raise ValueError(f"Error al procesar archivo TXT: {str(e)}")
+    
+    # Crear estructura JSON
+    datos_json = {
+        "respuestas": clave_respuestas,
+        "total_preguntas": len(clave_respuestas),
+        "fecha_generacion": str(np.datetime64('now')),
+        "formato": "pregunta_idx: respuesta"
+    }
+    
+    # Guardar si se especifica ruta de salida
+    if ruta_salida_json:
+        with open(ruta_salida_json, 'w', encoding='utf-8') as f:
+            json.dump(datos_json, f, ensure_ascii=False, indent=2)
+    
+    return datos_json
 
 # ==============================
 # 🆕 Funciones para generar hojas PDF
@@ -99,41 +222,9 @@ BANCO_PREGUNTAS = {
         {
             "enunciado": "¿Cuál es el resultado de 15 + 27?",
             "opciones": ["32", "42", "52", "37", "45"]
-        },
-        {
-            "enunciado": "Si un triángulo tiene base 8 cm y altura 5 cm, ¿cuál es su área?",
-            "opciones": ["13 cm²", "20 cm²", "40 cm²", "25 cm²", "30 cm²"]
-        },
-        {
-            "enunciado": "¿Qué fracción es equivalente a 0.75?",
-            "opciones": ["1/4", "2/3", "3/4", "4/5", "5/6"]
-        },
-        {
-            "enunciado": "Resolver: 3x + 7 = 22",
-            "opciones": ["x = 3", "x = 5", "x = 6", "x = 4", "x = 7"]
-        },
-        {
-            "enunciado": "¿Cuál es el MCD de 24 y 36?",
-            "opciones": ["6", "8", "12", "4", "18"]
         }
     ],
     "Historia Universal": [
-        {
-            "enunciado": "¿En qué año comenzó la Segunda Guerra Mundial?",
-            "opciones": ["1914", "1939", "1945", "1918", "1929"]
-        },
-        {
-            "enunciado": "¿Quién descubrió América?",
-            "opciones": ["Vasco da Gama", "Cristóbal Colón", "Magallanes", "Marco Polo", "Hernán Cortés"]
-        },
-        {
-            "enunciado": "¿Qué civilización construyó las pirámides de Egipto?",
-            "opciones": ["Griegos", "Romanos", "Egipcios", "Mayas", "Persas"]
-        },
-        {
-            "enunciado": "¿En qué siglo cayó el Imperio Romano de Occidente?",
-            "opciones": ["Siglo III", "Siglo V", "Siglo VII", "Siglo IX", "Siglo XI"]
-        },
         {
             "enunciado": "¿Qué revolucionó la industria textil en el siglo XVIII?",
             "opciones": ["Telar mecánico", "Motor de vapor", "Electricidad", "Computadora", "Radio"]
@@ -141,65 +232,17 @@ BANCO_PREGUNTAS = {
     ],
     "Ciencias Naturales": [
         {
-            "enunciado": "¿Qué planeta es conocido como el planeta rojo?",
-            "opciones": ["Venus", "Marte", "Júpiter", "Saturno", "Mercurio"]
-        },
-        {
-            "enunciado": "¿Qué gas necesitan las plantas para la fotosíntesis?",
-            "opciones": ["Oxígeno", "Nitrógeno", "Dióxido de carbono", "Hidrógeno", "Argón"]
-        },
-        {
-            "enunciado": "¿Cuál es el hueso más largo del cuerpo humano?",
-            "opciones": ["Fémur", "Tibia", "Húmero", "Cráneo", "Columna"]
-        },
-        {
-            "enunciado": "¿Qué partícula tiene carga positiva?",
-            "opciones": ["Electrón", "Protón", "Neutrón", "Átomo", "Molécula"]
-        },
-        {
             "enunciado": "¿Qué proceso convierte el agua en vapor?",
             "opciones": ["Condensación", "Evaporación", "Solidificación", "Fusión", "Sublimación"]
         }
     ],
     "Geografía": [
         {
-            "enunciado": "¿Cuál es el río más largo del mundo?",
-            "opciones": ["Nilo", "Amazonas", "Misisipi", "Yangtsé", "Danubio"]
-        },
-        {
-            "enunciado": "¿Qué montaña es la más alta del mundo?",
-            "opciones": ["K2", "Everest", "Aconcagua", "Kilimanjaro", "Mont Blanc"]
-        },
-        {
-            "enunciado": "¿Qué país tiene la mayor población del mundo?",
-            "opciones": ["India", "China", "Estados Unidos", "Indonesia", "Brasil"]
-        },
-        {
-            "enunciado": "¿Qué océano es el más grande?",
-            "opciones": ["Atlántico", "Pacífico", "Índico", "Ártico", "Antártico"]
-        },
-        {
             "enunciado": "¿Qué desierto es el más grande del mundo?",
             "opciones": ["Sahara", "Gobi", "Kalahari", "Antártico", "Arábigo"]
         }
     ],
     "Literatura Española": [
-        {
-            "enunciado": "¿Quién escribió 'Don Quijote de la Mancha'?",
-            "opciones": ["Miguel de Cervantes", "Federico García Lorca", "Lope de Vega", "Calderón de la Barca", "Francisco de Quevedo"]
-        },
-        {
-            "enunciado": "¿Qué obra es de Federico García Lorca?",
-            "opciones": ["La Celestina", "Bodas de Sangre", "Lazarillo de Tormes", "Rimas y Leyendas", "Los Pazos de Ulloa"]
-        },
-        {
-            "enunciado": "¿En qué siglo vivió Lope de Vega?",
-            "opciones": ["Siglo XV", "Siglo XVI", "Siglo XVII", "Siglo XVIII", "Siglo XIX"]
-        },
-        {
-            "enunciado": "¿Qué movimiento literario pertenece al Romanticismo?",
-            "opciones": ["Gustavo Adolfo Bécquer", "Miguel de Unamuno", "Antonio Machado", "Pío Baroja", "Benito Pérez Galdós"]
-        },
         {
             "enunciado": "¿Qué generación literaria incluye a Antonio Machado?",
             "opciones": ["Generación del 27", "Generación del 98", "Generación del 14", "Generación del 36", "Generación del 50"]

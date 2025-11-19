@@ -1,13 +1,17 @@
 # [file name]: main.py
 
 import os
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import cv2
+import json
+import numpy as np
 
 # Importar la lógica del programa
-from logica import procesar_imagen, GeneradorPDF, GestorCuestionarios, BANCO_PREGUNTAS
+from logica import GeneradorPDF, GestorCuestionarios, BANCO_PREGUNTAS
+from calificador_automatico import CalificadorAutomatico
 
 # ==============================
 # 🪟 Interfaz gráfica
@@ -16,15 +20,14 @@ from logica import procesar_imagen, GeneradorPDF, GestorCuestionarios, BANCO_PRE
 class AplicacionCalificador:
     def __init__(self, root):
         self.root = root
-        self.root.title("🧾 Calificador Interactivo - Generador de PDFs")
-        self.root.geometry("1000x700")
-        self.root.minsize(900, 600)
+        self.root.title("🧾 Generador de Cuestionarios PDF - Calificador Automático")
+        self.root.geometry("1100x750")
+        self.root.minsize(1000, 650)
         self.root.configure(bg="#f7f7f7")
         
         # Variables globales
-        self.ruta_imagen = None
-        self.imagen_tk = None
         self.preguntas_personalizadas = []
+        self.calificador = CalificadorAutomatico()
         
         self.crear_interfaz()
     
@@ -34,143 +37,139 @@ class AplicacionCalificador:
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Crear pestañas
-        self.crear_pestana_calificacion()
-        self.crear_pestana_generador()
+        self.crear_pestana_calificacion_automatica()
         self.crear_pestana_personalizado()
         self.crear_pestana_cargar_json()
     
-    def crear_pestana_calificacion(self):
-        # Pestaña 1: Calificación
+    def crear_pestana_calificacion_automatica(self):
+        """Crea la pestaña para calificación automática de exámenes"""
         frame_calificacion = ttk.Frame(self.notebook)
-        self.notebook.add(frame_calificacion, text="📊 Calificar Exámenes")
+        self.notebook.add(frame_calificacion, text="🎯 Calificar Exámenes")
         
-        frame_main_cal = tk.Frame(frame_calificacion, bg="#f7f7f7")
-        frame_main_cal.pack(fill="both", expand=True)
+        # Frame principal dividido en izquierda y derecha
+        frame_main = tk.Frame(frame_calificacion, bg="#f7f7f7")
+        frame_main.pack(fill="both", expand=True, padx=10, pady=10)
         
-        frame_left_cal = tk.Frame(frame_main_cal, bg="#ffffff", bd=1, relief="solid")
-        frame_left_cal.pack(side="left", fill="both", expand=True)
+        # Panel izquierdo: imagen del examen
+        frame_imagen = tk.LabelFrame(frame_main, text="Vista del Examen", bg="#ffffff", font=("Arial", 10, "bold"))
+        frame_imagen.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
-        frame_right_cal = tk.Frame(frame_main_cal, bg="#f7f7f7", width=260)
-        frame_right_cal.pack(side="right", fill="y", padx=(10,0))
+        self.label_imagen_examen = tk.Label(frame_imagen, bg="black", text="Imagen del examen aparecerá aquí", 
+                                           fg="white", font=("Arial", 12))
+        self.label_imagen_examen.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Panel izquierdo: imagen calificada
-        self.label_canvas = tk.Label(frame_left_cal, bg="black")
-        self.label_canvas.pack(fill="both", expand=True, padx=8, pady=8)
+        # Panel derecho: controles
+        frame_controles = tk.Frame(frame_main, bg="#f7f7f7", width=350)
+        frame_controles.pack(side="right", fill="y")
+        frame_controles.pack_propagate(False)
         
-        # Panel derecho: controles y clave
-        tk.Label(frame_right_cal, text="Clave de Respuestas", font=("Arial", 11, "bold"), bg="#f7f7f7").pack(pady=(6,4))
+        # Título
+        tk.Label(frame_controles, text="Calificación Automática", 
+                font=("Arial", 14, "bold"), bg="#f7f7f7").pack(pady=(0, 15))
         
-        letras = ['A', 'B', 'C', 'D', 'E']
-        self.respuestas_vars = []
+        # Sección: Cargar clave de respuestas
+        frame_clave = tk.LabelFrame(frame_controles, text="1. Cargar Clave de Respuestas", 
+                                  bg="#f7f7f7", font=("Arial", 10, "bold"))
+        frame_clave.pack(fill="x", pady=(0, 10))
         
-        for i in range(5):
-            cont = tk.Frame(frame_right_cal, bg="#f7f7f7")
-            cont.pack(fill="x", pady=4, padx=6)
-            tk.Label(cont, text=f"P{i+1}:", width=4, anchor="w", bg="#f7f7f7").pack(side="left")
-            var = tk.StringVar(value="")
-            self.respuestas_vars.append(var)
-            for letra in letras:
-                rb = tk.Radiobutton(cont, text=letra, variable=var, value=letra.lower(), bg="#f7f7f7")
-                rb.deselect()
-                rb.pack(side="left", padx=2)
+        btn_cargar_clave = tk.Button(frame_clave, text="📁 Cargar Clave JSON", 
+                                   command=self.cargar_clave_json, bg="#4CAF50", fg="white")
+        btn_cargar_clave.pack(fill="x", padx=10, pady=5)
         
-        tk.Frame(frame_right_cal, height=8, bg="#f7f7f7").pack()
+        self.label_info_clave = tk.Label(frame_clave, text="No se ha cargado ninguna clave", 
+                                       bg="#f7f7f7", wraplength=320, justify="left")
+        self.label_info_clave.pack(fill="x", padx=10, pady=(0, 5))
         
-        # Botones y controles
-        btn_sel = tk.Button(frame_right_cal, text="📂 Seleccionar Imagen", command=self.seleccionar_imagen)
-        btn_sel.pack(fill="x", padx=8, pady=(4,2))
+        # Sección: Seleccionar examen
+        frame_examen = tk.LabelFrame(frame_controles, text="2. Seleccionar Examen", 
+                                   bg="#f7f7f7", font=("Arial", 10, "bold"))
+        frame_examen.pack(fill="x", pady=(0, 10))
         
-        self.lbl_imagen_sel = tk.Label(frame_right_cal, text="Ninguna imagen seleccionada", bg="#f7f7f7", anchor="w")
-        self.lbl_imagen_sel.pack(fill="x", padx=8)
+        btn_seleccionar_examen = tk.Button(frame_examen, text="📷 Seleccionar Imagen", 
+                                         command=self.seleccionar_imagen_examen)
+        btn_seleccionar_examen.pack(fill="x", padx=10, pady=5)
         
-        self.label_resultado = tk.Label(frame_right_cal, text="", font=("Arial", 12, "bold"), bg="#f7f7f7")
-        self.label_resultado.pack(pady=(10,4))
+        self.label_info_examen = tk.Label(frame_examen, text="No se ha seleccionado ningún examen", 
+                                        bg="#f7f7f7", wraplength=320)
+        self.label_info_examen.pack(fill="x", padx=10, pady=(0, 5))
         
-        btn_calificar = tk.Button(frame_right_cal, text="🚀 Calificar Examen", bg="#2e8b57", fg="white", command=self.calificar_examen)
-        btn_calificar.pack(fill="x", padx=8, pady=(8,2))
+        # Sección: Calificar
+        frame_accion = tk.LabelFrame(frame_controles, text="3. Calificar Examen", 
+                                   bg="#f7f7f7", font=("Arial", 10, "bold"))
+        frame_accion.pack(fill="x", pady=(0, 10))
         
-        btn_reiniciar = tk.Button(frame_right_cal, text="🔁 Reiniciar / Calificar otro", bg="#808080", fg="white", command=self.reiniciar)
-        btn_reiniciar.pack(fill="x", padx=8, pady=(4,6))
+        btn_calificar = tk.Button(frame_accion, text="🚀 Calificar Automáticamente", 
+                                command=self.calificar_examen_automatico, 
+                                bg="#2196F3", fg="white", font=("Arial", 11, "bold"))
+        btn_calificar.pack(fill="x", padx=10, pady=8)
         
-        btn_guardar = tk.Button(frame_right_cal, text="💾 Guardar imagen calificada", command=self.guardar_calificada)
-        btn_guardar.pack(fill="x", padx=8, pady=(4,6))
+        # Resultados
+        frame_resultados = tk.LabelFrame(frame_controles, text="Resultados", 
+                                       bg="#f7f7f7", font=("Arial", 10, "bold"))
+        frame_resultados.pack(fill="x", pady=(0, 10))
         
-        tk.Label(frame_right_cal, text="5 preguntas · opciones A–E", bg="#f7f7f7", fg="#555").pack(side="bottom", pady=6)
-    
-    def crear_pestana_generador(self):
-        # Pestaña 2: Generar Exámenes PDF
-        frame_generar = ttk.Frame(self.notebook)
-        self.notebook.add(frame_generar, text="🆕 Generar PDFs")
+        self.label_puntaje = tk.Label(frame_resultados, text="Puntaje: --", 
+                                    font=("Arial", 16, "bold"), bg="#f7f7f7")
+        self.label_puntaje.pack(pady=5)
         
-        frame_main_gen = tk.Frame(frame_generar, bg="#f7f7f7")
-        frame_main_gen.pack(fill="both", expand=True, padx=20, pady=20)
+        self.label_detalle = tk.Label(frame_resultados, text="Correctas: 0/0", 
+                                    bg="#f7f7f7")
+        self.label_detalle.pack(pady=2)
         
-        # Configuración de exámenes PDF
-        tk.Label(frame_main_gen, text="Generador de Exámenes en PDF", 
-                font=("Arial", 16, "bold"), bg="#f7f7f7").pack(pady=(0,15))
+        # Detalles por pregunta
+        self.tree_resultados = ttk.Treeview(frame_resultados, 
+                                          columns=("Pregunta", "Seleccionada", "Correcta", "Estado"), 
+                                          show="headings", height=8)
+        self.tree_resultados.heading("Pregunta", text="Pregunta")
+        self.tree_resultados.heading("Seleccionada", text="Seleccionada")
+        self.tree_resultados.heading("Correcta", text="Correcta")
+        self.tree_resultados.heading("Estado", text="Estado")
         
-        frame_config = tk.Frame(frame_main_gen, bg="#f7f7f7")
-        frame_config.pack(fill="x", pady=10)
+        self.tree_resultados.column("Pregunta", width=60)
+        self.tree_resultados.column("Seleccionada", width=70)
+        self.tree_resultados.column("Correcta", width=70)
+        self.tree_resultados.column("Estado", width=70)
         
-        # Número de preguntas
-        tk.Label(frame_config, text="Número de preguntas:", bg="#f7f7f7").grid(row=0, column=0, sticky="w", padx=(0,10))
-        self.var_num_preguntas = tk.IntVar(value=5)
-        spin_preguntas = tk.Spinbox(frame_config, from_=1, to=20, textvariable=self.var_num_preguntas, width=5)
-        spin_preguntas.grid(row=0, column=1, sticky="w")
+        scroll_tree = ttk.Scrollbar(frame_resultados, orient="vertical", 
+                                  command=self.tree_resultados.yview)
+        self.tree_resultados.configure(yscrollcommand=scroll_tree.set)
         
-        # Número de opciones
-        tk.Label(frame_config, text="Opciones por pregunta:", bg="#f7f7f7").grid(row=0, column=2, sticky="w", padx=(20,10))
-        self.var_num_opciones = tk.IntVar(value=5)
-        spin_opciones = tk.Spinbox(frame_config, from_=2, to=7, textvariable=self.var_num_opciones, width=5)
-        spin_opciones.grid(row=0, column=3, sticky="w")
+        self.tree_resultados.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        scroll_tree.pack(side="right", fill="y")
         
-        # Temas disponibles
-        tk.Label(frame_main_gen, text="Temas disponibles:", font=("Arial", 11, "bold"), 
-                bg="#f7f7f7").pack(anchor="w", pady=(15,5))
+        # Botones de acción
+        frame_botones = tk.Frame(frame_controles, bg="#f7f7f7")
+        frame_botones.pack(fill="x", pady=10)
         
-        # Frame para temas predefinidos
-        frame_temas = tk.Frame(frame_main_gen, bg="#f7f7f7")
-        frame_temas.pack(fill="x", pady=5)
+        btn_guardar_resultados = tk.Button(frame_botones, text="💾 Guardar Resultados", 
+                                         command=self.guardar_resultados_calificacion)
+        btn_guardar_resultados.pack(fill="x", pady=2)
         
-        temas_predefinidos = list(BANCO_PREGUNTAS.keys())
-        self.var_temas_seleccionados = {}
+        btn_convertir_txt_json = tk.Button(frame_botones, text="🔄 Convertir TXT a JSON", 
+                                         command=self.convertir_txt_a_json)
+        btn_convertir_txt_json.pack(fill="x", pady=2)
         
-        for i, tema in enumerate(temas_predefinidos):
-            var = tk.BooleanVar(value=True)
-            self.var_temas_seleccionados[tema] = var
-            cb = tk.Checkbutton(frame_temas, text=tema, variable=var, bg="#f7f7f7")
-            cb.grid(row=i//2, column=i%2, sticky="w", padx=10, pady=2)
-        
-        # Temas personalizados
-        tk.Label(frame_main_gen, text="Temas personalizados (uno por línea):", 
-                font=("Arial", 11, "bold"), bg="#f7f7f7").pack(anchor="w", pady=(15,5))
-        
-        self.text_temas_personalizados = tk.Text(frame_main_gen, height=3, width=50)
-        self.text_temas_personalizados.pack(fill="x", pady=(0,10))
-        
-        btn_generar = tk.Button(frame_main_gen, text="📄 Generar Exámenes PDF", 
-                            bg="#dc3545", fg="white", font=("Arial", 12, "bold"),
-                            command=self.generar_pdfs_desde_interfaz)
-        btn_generar.pack(fill="x", pady=20)
+        btn_reiniciar = tk.Button(frame_botones, text="🔁 Reiniciar", 
+                                command=self.reiniciar_calificacion, bg="#f44336", fg="white")
+        btn_reiniciar.pack(fill="x", pady=2)
         
         # Información
-        frame_info = tk.Frame(frame_main_gen, bg="#e8f4f8", bd=1, relief="solid")
+        frame_info = tk.Frame(frame_controles, bg="#e8f4f8", bd=1, relief="solid")
         frame_info.pack(fill="x", pady=10)
-        tk.Label(frame_info, text="💡 Ventajas de los PDFs generados:", 
+        
+        tk.Label(frame_info, text="💡 Instrucciones:", 
                 font=("Arial", 10, "bold"), bg="#e8f4f8").pack(anchor="w", padx=10, pady=(10,5))
-        tk.Label(frame_info, text="• Formato PDF estándar listo para imprimir y escanear", 
-                bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info, text="• Burbujas de tamaño óptimo para detección automática", 
-                bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info, text="• Diseño limpio y profesional", 
-                bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info, text="• Separación entre cuestionario y hoja de respuestas", 
-                bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=2)
-        tk.Label(frame_info, text="• Compatible con cualquier impresora y escáner", 
-                bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=(2,10))
+        tk.Label(frame_info, text="1. Carga un archivo JSON con las respuestas correctas", 
+                bg="#e8f4f8", wraplength=320, justify="left").pack(anchor="w", padx=20, pady=2)
+        tk.Label(frame_info, text="2. Selecciona la imagen del examen escaneado", 
+                bg="#e8f4f8", wraplength=320, justify="left").pack(anchor="w", padx=20, pady=2)
+        tk.Label(frame_info, text="3. Haz clic en 'Calificar Automáticamente'", 
+                bg="#e8f4f8", wraplength=320, justify="left").pack(anchor="w", padx=20, pady=2)
+        tk.Label(frame_info, text="4. Revisa los resultados y guárdalos si es necesario", 
+                bg="#e8f4f8", wraplength=320, justify="left").pack(anchor="w", padx=20, pady=(2,10))
     
     def crear_pestana_personalizado(self):
-        # Pestaña 3: Cuestionarios Personalizados
+        # Pestaña 2: Cuestionarios Personalizados
         frame_personalizado = ttk.Frame(self.notebook)
         self.notebook.add(frame_personalizado, text="✏️ Cuestionarios Personalizados")
         
@@ -344,7 +343,7 @@ class AplicacionCalificador:
                 bg="#e8f4f8", wraplength=800, justify="left").pack(anchor="w", padx=20, pady=(2,10))
         
     def crear_pestana_cargar_json(self):
-        # Pestaña 4: Cargar desde JSON
+        # Pestaña 3: Cargar desde JSON
         frame_cargar = ttk.Frame(self.notebook)
         self.notebook.add(frame_cargar, text="📁 Cargar JSON")
         
@@ -460,151 +459,225 @@ class AplicacionCalificador:
         self.actualizar_lista_guardados()
 
     # ==============================
-    # Métodos de la pestaña Calificación
+    # Métodos de la pestaña Calificación Automática
     # ==============================
     
-    def seleccionar_imagen(self):
+    def cargar_clave_json(self):
+        """Carga un archivo JSON con las respuestas correctas"""
         ruta = filedialog.askopenfilename(
-            title="Seleccionar examen a calificar",
-            filetypes=[("Imágenes", "*.jpg *.jpeg *.png")]
+            title="Seleccionar archivo JSON de claves",
+            filetypes=[("Archivos JSON", "*.json")]
         )
+        
         if ruta:
-            self.ruta_imagen = ruta
-            self.lbl_imagen_sel.config(text=os.path.basename(ruta))
-            self.limpiar_canvas()
+            try:
+                if self.calificador.cargar_clave_desde_json(ruta):
+                    self.ruta_clave_json = ruta
+                    info = f"✅ Clave cargada: {self.calificador.num_preguntas} preguntas\n{os.path.basename(ruta)}"
+                    self.label_info_clave.config(text=info, fg="green")
+                else:
+                    self.label_info_clave.config(text="❌ Error al cargar la clave", fg="red")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo cargar el archivo JSON:\n{str(e)}")
     
-    def limpiar_canvas(self):
-        self.imagen_tk = None
-        self.label_canvas.config(image="", text="")
+    def seleccionar_imagen_examen(self):
+        """Selecciona una imagen de examen para calificar"""
+        ruta = filedialog.askopenfilename(
+            title="Seleccionar imagen del examen",
+            filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.bmp")]
+        )
+        
+        if ruta:
+            self.ruta_imagen_examen = ruta
+            self.label_info_examen.config(text=f"📷 {os.path.basename(ruta)}")
+            
+            # Mostrar vista previa de la imagen
+            self.mostrar_vista_previa_imagen(ruta)
     
-    def validar_clave(self):
-        for i, var in enumerate(self.respuestas_vars):
-            val = var.get()
-            if val not in ['a','b','c','d','e']:
-                return False, i+1
-        return True, None
+    def mostrar_vista_previa_imagen(self, ruta_imagen):
+        """Muestra una vista previa de la imagen del examen"""
+        try:
+            imagen = cv2.imread(ruta_imagen)
+            if imagen is not None:
+                # Redimensionar para vista previa
+                imagen_rgb = cv2.cvtColor(imagen, cv2.COLOR_BGR2RGB)
+                h, w = imagen_rgb.shape[:2]
+                
+                # Calcular tamaño máximo para el label
+                max_w = self.label_imagen_examen.winfo_width() or 600
+                max_h = self.label_imagen_examen.winfo_height() or 400
+                
+                scale = min(max_w / w, max_h / h, 1.0)  # No escalar más allá del 100%
+                new_w, new_h = int(w * scale), int(h * scale)
+                
+                imagen_redimensionada = cv2.resize(imagen_rgb, (new_w, new_h))
+                imagen_pil = Image.fromarray(imagen_redimensionada)
+                imagen_tk = ImageTk.PhotoImage(imagen_pil)
+                
+                self.label_imagen_examen.config(image=imagen_tk, text="")
+                self.label_imagen_examen.image = imagen_tk  # Mantener referencia
+            else:
+                self.label_imagen_examen.config(image="", text="❌ No se pudo cargar la imagen")
+        except Exception as e:
+            self.label_imagen_examen.config(image="", text=f"❌ Error: {str(e)}")
     
-    def ajustar_imagen_para_label(self, img_cv, max_w, max_h):
-        img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
-        h, w = img_rgb.shape[:2]
-        scale = min(max_w / w, max_h / h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        img_pil = Image.fromarray(img_rgb).resize((new_w, new_h))
-        return ImageTk.PhotoImage(img_pil)
-    
-    def calificar_examen(self):
-        if not self.ruta_imagen:
-            messagebox.showerror("Error", "Selecciona primero una imagen.")
+    def calificar_examen_automatico(self):
+        """Ejecuta la calificación automática del examen"""
+        # Validaciones
+        if not hasattr(self, 'ruta_clave_json') or not self.ruta_clave_json:
+            messagebox.showerror("Error", "Primero carga un archivo JSON con las respuestas correctas.")
             return
         
-        ok, falta = self.validar_clave()
-        if not ok:
-            messagebox.showerror("Clave incompleta", f"Selecciona una opción para la pregunta {falta}.")
+        if not hasattr(self, 'ruta_imagen_examen') or not self.ruta_imagen_examen:
+            messagebox.showerror("Error", "Primero selecciona una imagen del examen.")
             return
         
-        clave = {i: ord(var.get()) - 97 for i, var in enumerate(self.respuestas_vars)}
+        # Mostrar mensaje de procesamiento
+        self.label_imagen_examen.config(text="🔄 Procesando imagen...", image="")
+        self.root.update()
         
         try:
-            puntaje, hoja = procesar_imagen(self.ruta_imagen, clave)
+            # Calificar examen
+            puntaje, imagen_procesada, resultados, error = self.calificador.procesar_hoja_respuestas(self.ruta_imagen_examen)
+            
+            if error:
+                messagebox.showerror("Error", f"No se pudo calificar el examen:\n{error}")
+                self.label_imagen_examen.config(text="❌ Error en el procesamiento", image="")
+                return
+            
+            # Mostrar resultados
+            self.mostrar_resultados_calificacion(puntaje, imagen_procesada, resultados)
+            
+            # Guardar referencia a los resultados actuales
+            self.resultados_actuales = resultados
+            self.puntaje_actual = puntaje
+            self.imagen_procesada_actual = imagen_procesada
+            
+            messagebox.showinfo("Calificación completada", 
+                              f"✅ Examen calificado correctamente\n\nPuntaje: {puntaje:.2f}%")
+            
         except Exception as e:
-            messagebox.showerror("Error al procesar", str(e))
+            messagebox.showerror("Error", f"Error inesperado:\n{str(e)}")
+            self.label_imagen_examen.config(text="❌ Error inesperado", image="")
+    
+    def mostrar_resultados_calificacion(self, puntaje, imagen_procesada, resultados):
+        """Muestra los resultados de la calificación en la interfaz"""
+        # Mostrar imagen procesada
+        if imagen_procesada is not None:
+            imagen_rgb = cv2.cvtColor(imagen_procesada, cv2.COLOR_BGR2RGB)
+            h, w = imagen_rgb.shape[:2]
+            
+            max_w = self.label_imagen_examen.winfo_width() or 600
+            max_h = self.label_imagen_examen.winfo_height() or 400
+            
+            scale = min(max_w / w, max_h / h, 1.0)
+            new_w, new_h = int(w * scale), int(h * scale)
+            
+            imagen_redimensionada = cv2.resize(imagen_rgb, (new_w, new_h))
+            imagen_pil = Image.fromarray(imagen_redimensionada)
+            imagen_tk = ImageTk.PhotoImage(imagen_pil)
+            
+            self.label_imagen_examen.config(image=imagen_tk, text="")
+            self.label_imagen_examen.image = imagen_tk
+        
+        # Actualizar estadísticas
+        correctas = sum(1 for r in resultados if r['es_correcta'])
+        total = len(resultados)
+        
+        self.label_puntaje.config(text=f"Puntaje: {puntaje:.2f}%")
+        self.label_detalle.config(text=f"Correctas: {correctas}/{total}")
+        
+        # Colorear según puntaje
+        if puntaje >= 80:
+            self.label_puntaje.config(fg="green")
+        elif puntaje >= 60:
+            self.label_puntaje.config(fg="orange")
+        else:
+            self.label_puntaje.config(fg="red")
+        
+        # Mostrar detalles por pregunta
+        self.tree_resultados.delete(*self.tree_resultados.get_children())
+        
+        for resultado in resultados:
+            preg = resultado['pregunta']
+            selec = resultado['letra_seleccionada']
+            correcta = resultado['letra_correcta']
+            estado = "✅" if resultado['es_correcta'] else "❌"
+            
+            self.tree_resultados.insert("", "end", values=(preg, selec, correcta, estado))
+    
+    def guardar_resultados_calificacion(self):
+        """Guarda los resultados de la calificación actual"""
+        if not hasattr(self, 'resultados_actuales') or not self.resultados_actuales:
+            messagebox.showinfo("Información", "Primero califica un examen para poder guardar los resultados.")
             return
         
-        self.label_canvas.update_idletasks()
-        max_w = self.label_canvas.winfo_width() or 480
-        max_h = self.label_canvas.winfo_height() or 420
-        self.imagen_tk = self.ajustar_imagen_para_label(hoja, max_w-4, max_h-4)
-        self.label_canvas.config(image=self.imagen_tk)
-        
-        self.label_resultado.config(text=f"Calificación: {puntaje:.2f}%")
-    
-    def reiniciar(self):
-        self.ruta_imagen = None
-        self.imagen_tk = None
-        self.label_canvas.config(image="", text="")
-        self.lbl_imagen_sel.config(text="Ninguna imagen seleccionada")
-        self.label_resultado.config(text="")
-        for var in self.respuestas_vars:
-            var.set("")
-    
-    def guardar_calificada(self):
-        if not self.ruta_imagen or self.imagen_tk is None:
-            messagebox.showinfo("Nada que guardar", "Primero selecciona y califica una imagen.")
-            return
-        carpeta = filedialog.askdirectory(title="Seleccionar carpeta para guardar")
+        carpeta = filedialog.askdirectory(title="Seleccionar carpeta para guardar resultados")
         if not carpeta:
             return
-        nombre_salida = os.path.splitext(os.path.basename(self.ruta_imagen))[0] + "_calificada.png"
-        salida = os.path.join(carpeta, nombre_salida)
-        clave = {i: ord(var.get()) - 97 for i, var in enumerate(self.respuestas_vars)}
-        try:
-            _, hoja = procesar_imagen(self.ruta_imagen, clave)
-            cv2.imwrite(salida, hoja)
-            messagebox.showinfo("Guardado", f"Imagen guardada en:\n{salida}")
-        except Exception as e:
-            messagebox.showerror("Error al guardar", str(e))
-    
-    # ==============================
-    # Métodos de la pestaña Generador PDF
-    # ==============================
-    
-    def generar_pdfs_desde_interfaz(self):
-        # Obtener temas seleccionados
-        temas_seleccionados = []
-        
-        # Temas predefinidos seleccionados
-        for tema, var in self.var_temas_seleccionados.items():
-            if var.get():
-                temas_seleccionados.append(tema)
-        
-        # Temas personalizados
-        temas_personalizados_texto = self.text_temas_personalizados.get("1.0", "end-1c").strip()
-        if temas_personalizados_texto:
-            temas_personalizados = [tema.strip() for tema in temas_personalizados_texto.split('\n') if tema.strip()]
-            temas_seleccionados.extend(temas_personalizados)
-        
-        if not temas_seleccionados:
-            messagebox.showerror("Error", "Selecciona al menos un tema.")
-            return
-        
-        num_preguntas = self.var_num_preguntas.get()
-        num_opciones = self.var_num_opciones.get()
-        
-        carpeta = filedialog.askdirectory(title="Seleccionar carpeta para guardar los PDFs")
-        if not carpeta:
-            return
         
         try:
-            resultados, claves = GeneradorPDF.generar_examenes_masivos(
-                temas=temas_seleccionados,
-                num_preguntas=num_preguntas,
-                num_opciones=num_opciones,
-                carpeta_salida=carpeta
+            ruta_imagen, ruta_reporte = self.calificador.guardar_resultados(
+                self.ruta_imagen_examen,
+                self.imagen_procesada_actual,
+                self.resultados_actuales,
+                self.puntaje_actual,
+                carpeta
             )
             
-            archivos_generados = len(temas_seleccionados) * 3  # cuestionario + hoja estudiante + hoja profesor
-            
             messagebox.showinfo("Éxito", 
-                            f"✅ Se generaron {archivos_generados} archivos PDF en:\n{carpeta}\n\n"
-                            f"• {len(temas_seleccionados)} cuestionarios con preguntas\n"
-                            f"• {len(temas_seleccionados)} hojas de respuestas para estudiantes\n"
-                            f"• {len(temas_seleccionados)} hojas de corrección para profesores\n"
-                            f"• Archivo de claves: claves_respuestas.txt\n"
-                            f"• Banco de preguntas: preguntas_completas.json")
-            
-            # Preguntar si abrir la carpeta
-            abrir = messagebox.askyesno("Abrir carpeta", "¿Deseas abrir la carpeta con los archivos generados?")
-            if abrir:
-                if os.name == 'nt':  # Windows
-                    os.startfile(carpeta)
-                elif os.name == 'posix':  # macOS, Linux
-                    os.system(f'open "{carpeta}"' if os.uname().sysname == 'Darwin' else f'xdg-open "{carpeta}"')
+                              f"✅ Resultados guardados en:\n{carpeta}\n\n"
+                              f"• Imagen calificada: {os.path.basename(ruta_imagen)}\n"
+                              f"• Reporte: {os.path.basename(ruta_reporte)}")
             
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron generar los PDFs:\n{str(e)}")
+            messagebox.showerror("Error", f"No se pudieron guardar los resultados:\n{str(e)}")
     
+    def convertir_txt_a_json(self):
+        """Convierte un archivo TXT de claves a formato JSON"""
+        from calificador_automatico import generar_json_clave_desde_txt
+        
+        ruta_txt = filedialog.askopenfilename(
+            title="Seleccionar archivo TXT de claves",
+            filetypes=[("Archivos TXT", "*.txt")]
+        )
+        
+        if ruta_txt:
+            ruta_json = filedialog.asksaveasfilename(
+                title="Guardar JSON como",
+                defaultextension=".json",
+                filetypes=[("Archivos JSON", "*.json")]
+            )
+            
+            if ruta_json:
+                try:
+                    generar_json_clave_desde_txt(ruta_txt, ruta_json)
+                    messagebox.showinfo("Éxito", f"Archivo JSON generado:\n{ruta_json}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"No se pudo convertir el archivo:\n{str(e)}")
+    
+    def reiniciar_calificacion(self):
+        """Reinicia la interfaz de calificación"""
+        if hasattr(self, 'ruta_clave_json'):
+            del self.ruta_clave_json
+        if hasattr(self, 'ruta_imagen_examen'):
+            del self.ruta_imagen_examen
+        if hasattr(self, 'resultados_actuales'):
+            del self.resultados_actuales
+        if hasattr(self, 'puntaje_actual'):
+            del self.puntaje_actual
+        if hasattr(self, 'imagen_procesada_actual'):
+            del self.imagen_procesada_actual
+        
+        self.label_info_clave.config(text="No se ha cargado ninguna clave", fg="black")
+        self.label_info_examen.config(text="No se ha seleccionado ningún examen")
+        self.label_imagen_examen.config(image="", text="Imagen del examen aparecerá aquí")
+        self.label_puntaje.config(text="Puntaje: --", fg="black")
+        self.label_detalle.config(text="Correctas: 0/0")
+        self.tree_resultados.delete(*self.tree_resultados.get_children())
+
     # ==============================
-    # Métodos de la pestaña Personalizado
+    # Métodos de la pestaña Personalizado (se mantienen igual)
     # ==============================
     
     def actualizar_campos_opciones(self):
@@ -823,7 +896,7 @@ class AplicacionCalificador:
             messagebox.showerror("Error", f"No se pudo generar el cuestionario:\n{str(e)}")
     
     # ==============================
-    # Métodos de la pestaña Cargar JSON
+    # Métodos de la pestaña Cargar JSON (se mantienen igual)
     # ==============================
     
     def seleccionar_archivo_json(self):
